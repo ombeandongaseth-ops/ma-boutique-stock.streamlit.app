@@ -3,20 +3,50 @@ import streamlit as st
 import pandas as pd
 import datetime
 import hashlib
+import urllib.parse
 
 # --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(
-    page_title="SaaS GestionStock Pro",
+    page_title="SaaS GestionStock Pro - Seth Prod",
     page_icon="📦",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"  # Masque la sidebar pour libérer l'écran mobile
 )
+
+# --- INJECTION CSS POUR MASQUER LES EN-TÊTES STREAMLIT/GITHUB ET ADAPTER AU MOBILE ---
+st.markdown("""
+    <style>
+    /* Masquer la barre supérieure native Streamlit/GitHub */
+    header {visibility: hidden;}
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stAppDeployButton {display:none;}
+    
+    /* Optimisation du conteneur principal pour smartphone */
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 2rem;
+        padding-left: 0.8rem;
+        padding-right: 0.8rem;
+    }
+    
+    /* Cartes de statistiques stylisées */
+    .stMetric {
+        background-color: #ffffff;
+        padding: 12px;
+        border-radius: 10px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.08);
+        border: 1px solid #e0e0e0;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- INITIALISATION DE LA BASE DE DONNÉES ---
 def init_db():
     conn = sqlite3.connect("plateforme_saas.db", check_same_thread=False)
     cursor = conn.cursor()
     
-    # Table des utilisateurs / commerçants
+    # Table des utilisateurs (Propriétaires & Employés)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS utilisateurs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,18 +54,22 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
             date_expiration TEXT NOT NULL,
-            statut TEXT NOT NULL
+            statut TEXT NOT NULL,
+            role TEXT DEFAULT 'Gerant',
+            parent_id INTEGER DEFAULT 0
         )
     ''')
     
-    # Table des produits
+    # Table des produits (avec code-barres / référence)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS produits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             nom TEXT NOT NULL,
+            code_barre TEXT,
             prix REAL NOT NULL,
-            quantite INTEGER NOT NULL
+            quantite INTEGER NOT NULL,
+            fournisseur_id INTEGER
         )
     ''')
     
@@ -44,6 +78,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS ventes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
+            vendeur TEXT NOT NULL,
             produit TEXT NOT NULL,
             prix_unitaire REAL NOT NULL,
             quantite INTEGER NOT NULL,
@@ -65,7 +100,18 @@ def init_db():
         )
     ''')
 
-    # Table des annonces / notifications globales de l'admin (Seth Prod)
+    # Table des fournisseurs
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fournisseurs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            nom TEXT NOT NULL,
+            telephone TEXT NOT NULL,
+            adresse TEXT
+        )
+    ''')
+
+    # Table des annonces globales
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS annonces (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,62 +129,62 @@ conn, cursor = init_db()
 def make_hash(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
-# Gestion de la session
 if 'user' not in st.session_state:
     st.session_state['user'] = None
 
 # ==================== PAGE DE CONNEXION / INSCRIPTION ====================
 if st.session_state['user'] is None:
-    st.title("🔐 GestionStock Pro - Espace Connexion")
+    st.title("📱 GestionStock Pro")
+    st.caption("Développé par **Seth Prod** • Support : `053119132`")
     
-    st.sidebar.markdown("### 📞 Support & Paiement")
-    st.sidebar.info("""
-    Besoin d'aide ou d'activer votre compte ?
-    * **Développeur :** Seth Prod
-    * **WhatsApp / Mobile Money :** `053119132`
-    """)
-
-    choix_auth = st.selectbox("Action", ["Connexion", "Créer un compte commerçant"])
+    choix_auth = st.segmented_control("Accès", ["Connexion", "Créer un compte"], default="Connexion")
     
     if choix_auth == "Connexion":
         with st.form("form_login"):
-            username = st.text_input("Identifiant (Nom de votre boutique)").strip()
+            username = st.text_input("Identifiant (Boutique ou Caissier)").strip()
             password = st.text_input("Mot de passe", type="password")
-            submit_login = st.form_submit_button("Se connecter")
+            submit_login = st.form_submit_button("Se connecter", type="primary", use_container_width=True)
             
             if submit_login:
-                # Vérification Admin Seth
+                # Connexion Admin
                 if username == "adminseth" and password == "admin2309":
-                    st.session_state['user'] = {"id": 9999, "boutique": "ADMINISTRATION", "username": "adminseth"}
+                    st.session_state['user'] = {"id": 9999, "boutique": "ADMINISTRATION", "username": "adminseth", "role": "Admin", "owner_id": 9999}
                     st.success("Connexion Admin réussie !")
                     st.rerun()
                 
-                # Connexion commerçant classique
-                cursor.execute("SELECT id, nom_boutique, username, password, date_expiration, statut FROM utilisateurs WHERE username = ?", (username,))
+                cursor.execute("SELECT id, nom_boutique, username, password, date_expiration, statut, role, parent_id FROM utilisateurs WHERE username = ?", (username,))
                 user_data = cursor.fetchone()
                 
                 if user_data and user_data[3] == make_hash(password):
-                    date_exp = datetime.datetime.strptime(user_data[4], "%Y-%m-%d").date()
-                    if user_data[5] == "Actif" and datetime.date.today() <= date_exp:
+                    owner_id = user_data[0] if user_data[6] == 'Gerant' else user_data[7]
+                    
+                    # Vérifier l'abonnement du gérant principal
+                    cursor.execute("SELECT date_expiration, statut FROM utilisateurs WHERE id = ?", (owner_id,))
+                    ab_data = cursor.fetchone()
+                    
+                    date_exp = datetime.datetime.strptime(ab_data[0], "%Y-%m-%d").date()
+                    if ab_data[1] == "Actif" and datetime.date.today() <= date_exp:
                         st.session_state['user'] = {
                             "id": user_data[0],
                             "boutique": user_data[1],
-                            "username": user_data[2]
+                            "username": user_data[2],
+                            "role": user_data[6],
+                            "owner_id": owner_id
                         }
                         st.success("Connexion réussie !")
                         st.rerun()
                     else:
-                        st.error("⚠️ Votre abonnement a expiré. Veuillez contacter Seth Prod au 053119132 pour renouveler.")
+                        st.error("⚠️ L'abonnement de cette boutique a expiré. Contactez Seth Prod au 053119132.")
                 else:
                     st.error("Identifiant ou mot de passe incorrect.")
                     
-    elif choix_auth == "Créer un compte commerçant":
+    else:
         with st.form("form_signup"):
-            st.info("🎁 7 jours d'essai offerts à l'inscription !")
+            st.info("🎁 7 jours d'essai gratuits à l'inscription !")
             nom_boutique = st.text_input("Nom de votre boutique").strip()
             username = st.text_input("Choisissez un identifiant unique").strip()
             password = st.text_input("Mot de passe", type="password")
-            submit_signup = st.form_submit_button("S'inscrire et se connecter")
+            submit_signup = st.form_submit_button("S'inscrire et se connecter", type="primary", use_container_width=True)
             
             if submit_signup:
                 if username == "adminseth":
@@ -148,7 +194,7 @@ if st.session_state['user'] is None:
                         date_essai = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
                         hashed_pw = make_hash(password)
                         
-                        cursor.execute("INSERT INTO utilisateurs (nom_boutique, username, password, date_expiration, statut) VALUES (?, ?, ?, ?, ?)",
+                        cursor.execute("INSERT INTO utilisateurs (nom_boutique, username, password, date_expiration, statut, role, parent_id) VALUES (?, ?, ?, ?, ?, 'Gerant', 0)",
                                        (nom_boutique, username, hashed_pw, date_essai, "Actif"))
                         conn.commit()
                         
@@ -157,9 +203,11 @@ if st.session_state['user'] is None:
                         st.session_state['user'] = {
                             "id": new_user[0],
                             "boutique": new_user[1],
-                            "username": username
+                            "username": username,
+                            "role": "Gerant",
+                            "owner_id": new_user[0]
                         }
-                        st.success("Compte créé avec succès ! Redirection...")
+                        st.success("Compte créé avec succès !")
                         st.rerun()
                     except sqlite3.IntegrityError:
                         st.error("Cet identifiant existe déjà. Choisissez-en un autre.")
@@ -171,16 +219,15 @@ if st.session_state['user'] is None:
 # ==================== PANNEAU ADMINISTRATEUR (SETH PROD) ====================
 user = st.session_state['user']
 if user['id'] == 9999:
-    st.title("👑 Panneau de Contrôle - Seth Prod")
-    if st.button("Se déconnecter de l'admin"):
+    st.title("👑 Admin - Seth Prod")
+    if st.button("Se déconnecter"):
         st.session_state['user'] = None
         st.rerun()
         
-    tab_adm1, tab_adm2 = st.tabs(["👥 Gestion des Abonnés", "📢 Publier une Notification / Nouveauté"])
+    tab_adm1, tab_adm2 = st.tabs(["👥 Abonnés", "📢 Annonces"])
     
     with tab_adm1:
-        st.subheader("Liste de tous les commerçants abonnés")
-        cursor.execute("SELECT id, nom_boutique, username, date_expiration, statut FROM utilisateurs")
+        cursor.execute("SELECT id, nom_boutique, username, date_expiration, statut FROM utilisateurs WHERE role = 'Gerant'")
         clients = cursor.fetchall()
         
         if clients:
@@ -189,215 +236,271 @@ if user['id'] == 9999:
             
             col_a, col_b = st.columns(2)
             with col_a:
-                st.markdown("### 🔄 Prolonger un abonnement")
-                c_id = st.number_input("ID du client à prolonger", min_value=1, step=1, key="p_id")
-                jours_plus = st.number_input("Nombre de jours à ajouter", min_value=1, value=30, key="p_jours")
+                st.markdown("### 🔄 Prolonger Abonnement")
+                c_id = st.number_input("ID Client", min_value=1, step=1, key="p_id")
+                jours_plus = st.number_input("Jours à ajouter", min_value=1, value=30, key="p_jours")
                 
-                if st.button("Valider la prolongation"):
+                if st.button("Prolonger"):
                     cursor.execute("SELECT date_expiration FROM utilisateurs WHERE id = ?", (c_id,))
                     res = cursor.fetchone()
                     if res:
-                        date_actuelle_exp = datetime.datetime.strptime(res[0], "%Y-%m-%d").date()
-                        base_date = max(date_actuelle_exp, datetime.date.today())
+                        base_date = max(datetime.datetime.strptime(res[0], "%Y-%m-%d").date(), datetime.date.today())
                         nouvelle_exp = (base_date + datetime.timedelta(days=jours_plus)).strftime("%Y-%m-%d")
-                        
                         cursor.execute("UPDATE utilisateurs SET date_expiration = ?, statut = 'Actif' WHERE id = ?", (nouvelle_exp, c_id))
                         conn.commit()
-                        st.success(f"Abonnement du client ID {c_id} prolongé jusqu'au {nouvelle_exp} !")
+                        st.success(f"Prolongé jusqu'au {nouvelle_exp} !")
                         st.rerun()
             
             with col_b:
-                st.markdown("### 🗑️ Nettoyage des inactifs")
-                st.write("Supprimer automatiquement les comptes dont l'abonnement a expiré depuis plus d'une semaine.")
-                if st.button("Supprimer les inactifs (> 7 jours)", type="primary"):
+                st.markdown("### 🗑️ Supprimer Inactifs (> 7 jours)")
+                if st.button("Nettoyer les inactifs", type="primary"):
                     date_limite = (datetime.date.today() - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-                    cursor.execute("SELECT id, nom_boutique FROM utilisateurs WHERE date_expiration < ?", (date_limite,))
+                    cursor.execute("SELECT id FROM utilisateurs WHERE date_expiration < ? AND role = 'Gerant'", (date_limite,))
                     inactifs = cursor.fetchall()
-                    
-                    if inactifs:
-                        for ina in inactifs:
-                            uid = ina[0]
-                            # Supprimer l'utilisateur et ses données associées
-                            cursor.execute("DELETE FROM utilisateurs WHERE id = ?", (uid,))
-                            cursor.execute("DELETE FROM produits WHERE user_id = ?", (uid,))
-                            cursor.execute("DELETE FROM ventes WHERE user_id = ?", (uid,))
-                            cursor.execute("DELETE FROM credits WHERE user_id = ?", (uid,))
-                        conn.commit()
-                        st.success(f"{len(inactifs)} compte(s) inactif(s) supprimé(s) avec succès !")
-                        st.rerun()
-                    else:
-                        st.info("Aucun compte inactif de plus d'une semaine trouvé.")
-        else:
-            st.info("Aucun commerçant inscrit.")
+                    for ina in inactifs:
+                        uid = ina[0]
+                        cursor.execute("DELETE FROM utilisateurs WHERE id = ? OR parent_id = ?", (uid, uid))
+                        cursor.execute("DELETE FROM produits WHERE user_id = ?", (uid,))
+                        cursor.execute("DELETE FROM ventes WHERE user_id = ?", (uid,))
+                        cursor.execute("DELETE FROM credits WHERE user_id = ?", (uid,))
+                        cursor.execute("DELETE FROM fournisseurs WHERE user_id = ?", (uid,))
+                    conn.commit()
+                    st.success(f"{len(inactifs)} compte(s) inactif(s) nettoyé(s) !")
+                    st.rerun()
 
     with tab_adm2:
-        st.subheader("Diffusez une notification ou une mise à jour")
         with st.form("form_annonce"):
-            titre_notif = st.text_input("Titre de la nouveauté / notification")
-            contenu_notif = st.text_area("Détails de la mise à jour")
-            sub_notif = st.form_submit_button("Envoyer à tous les utilisateurs")
-            
-            if sub_notif and titre_notif and contenu_notif:
-                date_du_jour = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            titre = st.text_input("Titre de la nouveauté")
+            contenu = st.text_area("Contenu de l'annonce")
+            if st.form_submit_button("Diffuser") and titre and contenu:
                 cursor.execute("INSERT INTO annonces (titre, contenu, date_annonce) VALUES (?, ?, ?)",
-                               (titre_notif, contenu_notif, date_du_jour))
+                               (titre, contenu, datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
                 conn.commit()
-                st.success("Notification diffusée avec succès à tous les commerçants !")
-            elif sub_notif:
-                st.error("Veuillez remplir le titre et le contenu.")
+                st.success("Annonce envoyée !")
 
     st.stop()
 
-# ==================== APPLICATION PRINCIPALE (COMMERÇANT) ====================
-user_id = user['id']
+# ==================== APPLICATION COMMERÇANT / EMPLOYÉ ====================
+owner_id = user['owner_id']
+role = user['role']
 
-# --- VÉRIFICATION DES NOTIFICATIONS & EXPIRATION POUR LE COMMERÇANT ---
-cursor.execute("SELECT date_expiration FROM utilisateurs WHERE id = ?", (user_id,))
+# En-tête mobile épuré
+col_head1, col_head2 = st.columns([3, 1])
+with col_head1:
+    st.markdown(f"### 🏪 {user['boutique']} `({role})`")
+with col_head2:
+    if st.button("Déconnexion", use_container_width=True):
+        st.session_state['user'] = None
+        st.rerun()
+
+# Menus accessibles selon le rôle
+if role == "Gerant":
+    menu_options = ["🛒 Caisse", "📊 Tableau de Bord", "📦 Stocks", "📝 Crédits", "🏭 Fournisseurs", "👥 Caissiers", "📅 Abonnement"]
+else:
+    menu_options = ["🛒 Caisse", "📦 Stocks (Lecture)", "📝 Crédits"]
+
+menu = st.radio("Navigation", menu_options, horizontal=True)
+
+# Notifications & Expiration
+cursor.execute("SELECT date_expiration FROM utilisateurs WHERE id = ?", (owner_id,))
 date_exp_str = cursor.fetchone()[0]
-date_exp_obj = datetime.datetime.strptime(date_exp_str, "%Y-%m-%d").date()
-jours_restants = (date_exp_obj - datetime.date.today()).days
+jours_restants = (datetime.datetime.strptime(date_exp_str, "%Y-%m-%d").date() - datetime.date.today()).days
 
-# Alerte si l'abonnement expire bientôt (moins de 3 jours)
 if 0 <= jours_restants <= 3:
-    st.warning(f"⚠️ **Attention :** Votre abonnement expire dans {jours_restants} jour(s) (le {date_exp_str}). Pensez à renouveler auprès de Seth Prod (053119132).")
+    st.warning(f"⚠️ Votre abonnement expire dans {jours_restants} jour(s). Contactez Seth Prod (053119132).")
 
-# Affichage des dernières notifications / nouveautés de l'admin
-cursor.execute("SELECT titre, contenu, date_annonce FROM annonces ORDER BY id DESC LIMIT 3")
-dernieres_annonces = cursor.fetchall()
-if dernieres_annonces:
-    with st.expander("🔔 **Nouveautés & Notifications de Seth Prod** (Cliquez pour voir)"):
-        for ann in dernieres_annonces:
-            st.markdown(f"**📢 {ann[0]}** *({ann[2]})\n{ann[1]}")
-            st.markdown("---")
-
-st.sidebar.title(f"🏪 {user['boutique']}")
-if st.sidebar.button("Déconnexion"):
-    st.session_state['user'] = None
-    st.rerun()
-
-menu = st.sidebar.radio("Navigation", [
-    "📊 Tableau de Bord", 
-    "🛒 Caisse & Ventes", 
-    "📦 Gestion des Stocks", 
-    "📝 Carnet de Crédits", 
-    "📅 Mon Abonnement"
-])
-
-# 1. TABLEAU DE BORD
-if menu == "📊 Tableau de Bord":
-    st.header("📊 Vue d'ensemble de votre activité")
-    cursor.execute("SELECT SUM(total) FROM ventes WHERE user_id = ?", (user_id,))
-    ca_total = cursor.fetchone()[0] or 0.0
-    cursor.execute("SELECT COUNT(*) FROM ventes WHERE user_id = ?", (user_id,))
-    nb_ventes = cursor.fetchone()[0] or 0
-    cursor.execute("SELECT COUNT(*) FROM produits WHERE user_id = ? AND quantite <= 5", (user_id,))
-    alertes_stock = cursor.fetchone()[0] or 0
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("💰 Chiffre d'Affaires", f"{ca_total:,.0f} FCFA")
-    col2.metric("🛍️ Total des Ventes", f"{nb_ventes}")
-    col3.metric("⚠️ Alerte Stock", f"{alertes_stock}")
-
-    st.markdown("---")
-    if alertes_stock > 0:
-        st.warning(f"🚨 Attention : {alertes_stock} produit(s) ont un stock critique (≤ 5).")
-
-# 2. CAISSE & VENTES
-elif menu == "🛒 Caisse & Ventes":
-    st.header("🛒 Caisse Enregistreuse")
-    cursor.execute("SELECT id, nom, prix, quantite FROM produits WHERE user_id = ?", (user_id,))
+# ==================== 1. CAISSE & VENTI ====================
+if menu == "🛒 Caisse":
+    st.subheader("🛒 Caisse & Scan Code-Barres")
+    
+    # Recherche rapide par nom ou code-barres
+    recherche = st.text_input("🔍 Rechercher par nom ou scanner le code-barres").strip()
+    
+    if recherche:
+        cursor.execute("SELECT id, nom, prix, quantite, code_barre FROM produits WHERE user_id = ? AND (nom LIKE ? OR code_barre = ?)", 
+                       (owner_id, f"%{recherche}%", recherche))
+    else:
+        cursor.execute("SELECT id, nom, prix, quantite, code_barre FROM produits WHERE user_id = ?", (owner_id,))
+    
     produits = cursor.fetchall()
     
     if not produits:
-        st.warning("Votre stock est vide. Ajoutez des produits.")
+        st.warning("Aucun produit trouvé.")
     else:
-        col_c1, col_c2 = st.columns([2, 1])
-        with col_c1:
-            options = {f"{p[1]} (Stock: {p[3]} | Prix: {p[2]:,.0f} FCFA)": p for p in produits}
-            choix = st.selectbox("Choisir un produit", list(options.keys()))
-            p_id, p_nom, p_prix, p_stock = options[choix]
+        options = {f"{p[1]} | Code: {p[4] or 'N/A'} (Stock: {p[3]} | {p[2]:,.0f} FCFA)": p for p in produits}
+        choix = st.selectbox("Sélectionner un produit", list(options.keys()))
+        p_id, p_nom, p_prix, p_stock, p_code = options[choix]
+        
+        qte_achat = st.number_input("Quantité", min_value=1, max_value=max(1, p_stock), step=1)
+        total = p_prix * qte_achat
+        st.info(f"Montant Total : **{total:,.0f} FCFA**")
+        
+        nom_client_recu = st.text_input("Nom du client (optionnel pour le reçu WhatsApp)")
+        
+        if st.button("✅ Valider la Vente", type="primary", use_container_width=True):
+            cursor.execute("UPDATE produits SET quantite = ? WHERE id = ?", (p_stock - qte_achat, p_id))
+            date_v = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute("INSERT INTO ventes (user_id, vendeur, produit, prix_unitaire, quantite, total, date_vente) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                           (owner_id, user['username'], p_nom, p_prix, qte_achat, total, date_v))
+            conn.commit()
             
-            qte_achat = st.number_input("Quantité", min_value=1, max_value=max(1, p_stock), step=1)
-            total = p_prix * qte_achat
-            st.info(f"Total : **{total:,.0f} FCFA**")
+            st.success(f"Vente enregistrée par {user['username']} !")
             
-            if st.button("Valider la Vente", type="primary"):
-                cursor.execute("UPDATE produits SET quantite = ? WHERE id = ?", (p_stock - qte_achat, p_id))
-                cursor.execute("INSERT INTO ventes (user_id, produit, prix_unitaire, quantite, total, date_vente) VALUES (?, ?, ?, ?, ?, ?)",
-                               (user_id, p_nom, p_prix, qte_achat, total, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-                conn.commit()
-                st.success("Vente enregistrée avec succès !")
-                st.balloons()
-        with col_c2:
-            st.markdown("### Stock Rapide")
-            st.dataframe(pd.DataFrame(produits, columns=["ID", "Nom", "Prix", "Stock"])[["Nom", "Stock"]], hide_index=True, use_container_width=True)
+            # Message WhatsApp pré-rempli pour le reçu du client
+            texte_recu = f"🧾 *REÇU DE CAISSE - {user['boutique']}*\n" \
+                         f"Client : {nom_client_recu or 'Client'}\n" \
+                         f"Article : {p_nom} (x{qte_achat})\n" \
+                         f"Total : {total:,.0f} FCFA\n" \
+                         f"Date : {date_v}\nMerci pour votre confiance !"
+            
+            url_wa = f"https://api.whatsapp.com/send?text={urllib.parse.quote(texte_recu)}"
+            st.markdown(f"[📲 Envoyer le reçu sur WhatsApp]({url_wa})", unsafe_allow_html=True)
+            st.balloons()
 
-# 3. GESTION DES STOCKS
-elif menu == "📦 Gestion des Stocks":
-    st.header("📦 Gestion de vos Stocks")
-    tab1, tab2 = st.tabs(["Ajouter", "Voir & Exporter"])
-    with tab1:
-        with st.form("form_p"):
-            nom = st.text_input("Nom du produit")
-            prix = st.number_input("Prix (FCFA)", min_value=0.0, step=100.0)
-            qte = st.number_input("Quantité", min_value=0, step=1)
-            if st.form_submit_button("Ajouter") and nom and prix > 0:
-                cursor.execute("INSERT INTO produits (user_id, nom, prix, quantite) VALUES (?, ?, ?, ?)", (user_id, nom, prix, qte))
-                conn.commit()
-                st.success("Produit ajouté !")
-    with tab2:
-        cursor.execute("SELECT id, nom, prix, quantite FROM produits WHERE user_id = ?", (user_id,))
+# ==================== 2. TABLEAU DE BORD (GÉRANT SEUL) ====================
+elif menu == "📊 Tableau de Bord":
+    st.subheader("📊 Tableau de Bord Financier")
+    cursor.execute("SELECT SUM(total), COUNT(*) FROM ventes WHERE user_id = ?", (owner_id,))
+    ca, nb = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*) FROM produits WHERE user_id = ? AND quantite <= 5", (owner_id,))
+    alertes = cursor.fetchone()[0] or 0
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("💰 Chiffre d'Affaires", f"{ca or 0:,.0f} FCFA")
+    col2.metric("🛍️ Ventes", f"{nb or 0}")
+    col3.metric("⚠️ Stocks Bas", f"{alertes}")
+
+    st.markdown("---")
+    st.subheader("📊 Ventes récentes par caissier")
+    cursor.execute("SELECT vendeur, produit, quantite, total, date_vente FROM ventes WHERE user_id = ? ORDER BY id DESC LIMIT 10", (owner_id,))
+    v_data = cursor.fetchall()
+    if v_data:
+        st.dataframe(pd.DataFrame(v_data, columns=["Vendeur", "Produit", "Qte", "Total FCFA", "Date"]), use_container_width=True, hide_index=True)
+
+# ==================== 3. GESTION DES STOCKS ====================
+elif menu in ["📦 Stocks", "📦 Stocks (Lecture)"]:
+    st.subheader("📦 Gestion des Stocks & Codes-Barres")
+    
+    if role == "Gerant":
+        tab1, tab2 = st.tabs(["Ajouter / Modifier", "Inventaire"])
+        with tab1:
+            with st.form("form_p"):
+                nom = st.text_input("Nom de l'article")
+                code_barre = st.text_input("Code-barres / Référence (Facultatif)")
+                prix = st.number_input("Prix unitaire (FCFA)", min_value=0.0, step=100.0)
+                qte = st.number_input("Quantité initiale", min_value=0, step=1)
+                
+                # Sélection du fournisseur
+                cursor.execute("SELECT id, nom FROM fournisseurs WHERE user_id = ?", (owner_id,))
+                f_list = cursor.fetchall()
+                f_dict = {f[1]: f[0] for f in f_list}
+                f_choix = st.selectbox("Fournisseur associé", ["Aucun"] + list(f_dict.keys()))
+                
+                if st.form_submit_button("Enregistrer l'article", type="primary"):
+                    fid = f_dict[f_choix] if f_choix != "Aucun" else None
+                    cursor.execute("INSERT INTO produits (user_id, nom, code_barre, prix, quantite, fournisseur_id) VALUES (?, ?, ?, ?, ?, ?)",
+                                   (owner_id, nom, code_barre, prix, qte, fid))
+                    conn.commit()
+                    st.success("Produit ajouté avec succès !")
+        with tab2:
+            cursor.execute("SELECT id, nom, code_barre, prix, quantite FROM produits WHERE user_id = ?", (owner_id,))
+            data = cursor.fetchall()
+            if data:
+                df = pd.DataFrame(data, columns=["ID", "Article", "Code-Barres", "Prix FCFA", "Stock"])
+                st.dataframe(df, use_container_width=True, hide_index=True)
+                st.download_button("Télécharger Inventaire (CSV)", df.to_csv(index=False).encode('utf-8'), "inventaire.csv", "text/csv")
+    else:
+        cursor.execute("SELECT nom, code_barre, prix, quantite FROM produits WHERE user_id = ?", (owner_id,))
         data = cursor.fetchall()
-        if data:
-            df = pd.DataFrame(data, columns=["ID", "Nom", "Prix", "Stock"])
-            st.dataframe(df, use_container_width=True, hide_index=True)
-            st.download_button("Télécharger l'inventaire (CSV)", df.to_csv(index=False).encode('utf-8'), "inventaire.csv", "text/csv")
-        else:
-            st.info("Aucun produit.")
+        st.dataframe(pd.DataFrame(data, columns=["Article", "Code-Barres", "Prix FCFA", "Stock"]), use_container_width=True, hide_index=True)
 
-# 4. CARNET DE CRÉDITS
-elif menu == "📝 Carnet de Crédits":
-    st.header("📝 Ardoises & Crédits")
-    tab1, tab2 = st.tabs(["Nouveau Crédit", "Suivi"])
+# ==================== 4. CARNET DE CRÉDITS ====================
+elif menu == "📝 Crédits":
+    st.subheader("📝 Crédits & Ardoises Clients")
+    tab1, tab2 = st.tabs(["Nouveau Crédit", "Suivi & Règlement"])
     with tab1:
         with st.form("form_cred"):
             client = st.text_input("Nom du client")
-            montant = st.number_input("Montant (FCFA)", min_value=0.0)
-            motif = st.text_input("Motif")
-            if st.form_submit_button("Enregistrer") and client and montant > 0:
+            montant = st.number_input("Montant dû (FCFA)", min_value=0.0)
+            motif = st.text_input("Articles pris à crédit")
+            if st.form_submit_button("Enregistrer le crédit") and client and montant > 0:
                 cursor.execute("INSERT INTO credits (user_id, client_nom, montant, motif, date_credit, statut) VALUES (?, ?, ?, ?, ?, ?)",
-                               (user_id, client, montant, motif, datetime.datetime.now().strftime("%Y-%m-%d"), "Impayé"))
+                               (owner_id, client, montant, motif, datetime.datetime.now().strftime("%Y-%m-%d"), "Impayé"))
                 conn.commit()
                 st.success("Crédit enregistré !")
     with tab2:
-        cursor.execute("SELECT id, client_nom, montant, motif, date_credit, statut FROM credits WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT id, client_nom, montant, motif, date_credit, statut FROM credits WHERE user_id = ?", (owner_id,))
         c_data = cursor.fetchall()
         if c_data:
-            st.dataframe(pd.DataFrame(c_data, columns=["ID", "Client", "Montant", "Motif", "Date", "Statut"]), hide_index=True, use_container_width=True)
-            c_id = st.number_input("ID du crédit réglé", min_value=1, step=1)
-            if st.button("Marquer comme Payé"):
-                cursor.execute("UPDATE credits SET statut = 'Payé' WHERE id = ? AND user_id = ?", (c_id, user_id))
-                conn.commit()
-                st.success("Mis à jour !")
-                st.rerun()
-        else:
-            st.info("Aucun crédit.")
+            st.dataframe(pd.DataFrame(c_data, columns=["ID", "Client", "Montant FCFA", "Motif", "Date", "Statut"]), use_container_width=True, hide_index=True)
+            if role == "Gerant":
+                c_id = st.number_input("ID du crédit réglé", min_value=1, step=1)
+                if st.button("Marquer comme Payé"):
+                    cursor.execute("UPDATE credits SET statut = 'Payé' WHERE id = ? AND user_id = ?", (c_id, owner_id))
+                    conn.commit()
+                    st.success("Mis à jour !")
+                    st.rerun()
 
-# 5. MON ABONNEMENT
-elif menu == "📅 Mon Abonnement":
-    st.header("📅 Gestion de votre Abonnement")
-    cursor.execute("SELECT nom_boutique, date_expiration, statut FROM utilisateurs WHERE id = ?", (user_id,))
-    ab = cursor.fetchone()
+# ==================== 5. FOURNISSEURS & COMMANDES ====================
+elif menu == "🏭 Fournisseurs":
+    st.subheader("🏭 Gestion des Fournisseurs & Commandes")
+    tab1, tab2 = st.tabs(["Ajouter Fournisseur", "Commander sur WhatsApp"])
+    with tab1:
+        with st.form("form_f"):
+            nom_f = st.text_input("Nom du fournisseur")
+            tel_f = st.text_input("Numéro WhatsApp / Téléphone")
+            adresse_f = st.text_input("Adresse / Marché")
+            if st.form_submit_button("Enregistrer Fournisseur") and nom_f and tel_f:
+                cursor.execute("INSERT INTO fournisseurs (user_id, nom, telephone, adresse) VALUES (?, ?, ?, ?)",
+                               (owner_id, nom_f, tel_f, adresse_f))
+                conn.commit()
+                st.success("Fournisseur ajouté !")
+    with tab2:
+        cursor.execute("SELECT id, nom, telephone FROM fournisseurs WHERE user_id = ?", (owner_id,))
+        fournis = cursor.fetchall()
+        if fournis:
+            f_dict = {f[1]: f[2] for f in fournis}
+            choix_f = st.selectbox("Choisir le fournisseur", list(f_dict.keys()))
+            message_cmd = st.text_area("Articles à commander", "Bonjour, je souhaite commander : \n- Article A : 10 unités\n- Article B : 5 unités")
+            
+            url_cmd = f"https://api.whatsapp.com/send?phone={f_dict[choix_f]}&text={urllib.parse.quote(message_cmd)}"
+            st.markdown(f"[📲 Envoyer le bon de commande sur WhatsApp]({url_cmd})", unsafe_allow_html=True)
+
+# ==================== 6. CAISSIERS / EMPLOYÉS ====================
+elif menu == "👥 Caissiers":
+    st.subheader("👥 Création des comptes Caissiers")
+    st.info("Créez des accès limités pour vos employés. Ils pourront faire des ventes sans voir votre chiffre d'affaires global.")
     
-    st.info(f"**Boutique :** {ab[0]}")
-    st.success(f"**Statut :** {ab[2]}")
-    st.warning(f"**Date d'expiration :** {ab[1]}")
+    with st.form("form_caissier"):
+        user_c = st.text_input("Identifiant du caissier").strip()
+        pass_c = st.text_input("Mot de passe caissier", type="password")
+        if st.form_submit_button("Créer le compte Caissier"):
+            if user_c and pass_c:
+                try:
+                    hashed_p = make_hash(pass_c)
+                    cursor.execute("INSERT INTO utilisateurs (nom_boutique, username, password, date_expiration, statut, role, parent_id) VALUES (?, ?, ?, ?, 'Actif', 'Caissier', ?)",
+                                   (user['boutique'], user_c, hashed_p, date_exp_str, owner_id))
+                    conn.commit()
+                    st.success(f"Compte Caissier '{user_c}' créé !")
+                except sqlite3.IntegrityError:
+                    st.error("Cet identifiant existe déjà.")
+
+    st.markdown("### Liste de vos Caissiers")
+    cursor.execute("SELECT id, username, role FROM utilisateurs WHERE parent_id = ?", (owner_id,))
+    caissiers = cursor.fetchall()
+    if caissiers:
+        st.dataframe(pd.DataFrame(caissiers, columns=["ID", "Identifiant", "Rôle"]), use_container_width=True, hide_index=True)
+
+# ==================== 7. ABONNEMENT ====================
+elif menu == "📅 Abonnement":
+    st.subheader("📅 Votre Abonnement SaaS")
+    st.info(f"**Boutique :** {user['boutique']}")
+    st.warning(f"**Date d'expiration :** {date_exp_str} ({jours_restants} jours restants)")
     
-    st.markdown("### 💳 Comment renouveler ?")
+    st.markdown("### 💳 Contact Développeur")
     st.write("""
-    Pour renouveler votre abonnement :
     * **Développeur :** Seth Prod
-    * **Numéro Mobile Money / WhatsApp :** `053119132`
+    * **WhatsApp / Mobile Money :** `053119132`
     
-    Effectuez votre paiement au numéro ci-dessus, puis envoyez la capture du transfert sur WhatsApp avec le nom de votre boutique pour prolonger votre accès de 30 jours.
+    Pour renouveler votre accès mensuel, effectuez le transfert Mobile Money au numéro ci-dessus et envoyez la capture sur WhatsApp.
     """)
