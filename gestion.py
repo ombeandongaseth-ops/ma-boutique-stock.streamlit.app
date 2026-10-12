@@ -64,6 +64,16 @@ def init_db():
             statut TEXT NOT NULL
         )
     ''')
+
+    # Table des annonces / notifications globales de l'admin (Seth Prod)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS annonces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            titre TEXT NOT NULL,
+            contenu TEXT NOT NULL,
+            date_annonce TEXT NOT NULL
+        )
+    ''')
     
     conn.commit()
     return conn, cursor
@@ -81,7 +91,6 @@ if 'user' not in st.session_state:
 if st.session_state['user'] is None:
     st.title("🔐 GestionStock Pro - Espace Connexion")
     
-    # Coordonnées officielles de Seth Prod
     st.sidebar.markdown("### 📞 Support & Paiement")
     st.sidebar.info("""
     Besoin d'aide ou d'activer votre compte ?
@@ -98,13 +107,13 @@ if st.session_state['user'] is None:
             submit_login = st.form_submit_button("Se connecter")
             
             if submit_login:
-                # --- VÉRIFICATION SI C'EST L'ADMIN ---
+                # Vérification Admin Seth
                 if username == "adminseth" and password == "admin2309":
                     st.session_state['user'] = {"id": 9999, "boutique": "ADMINISTRATION", "username": "adminseth"}
                     st.success("Connexion Admin réussie !")
                     st.rerun()
                 
-                # --- CONNEXION COMMERÇANT CLASSIQUE ---
+                # Connexion commerçant classique
                 cursor.execute("SELECT id, nom_boutique, username, password, date_expiration, statut FROM utilisateurs WHERE username = ?", (username,))
                 user_data = cursor.fetchone()
                 
@@ -159,7 +168,7 @@ if st.session_state['user'] is None:
                     
     st.stop()
 
-# ==================== SI VOUS ÊTES CONNECTÉ EN TANT QU'ADMIN ====================
+# ==================== PANNEAU ADMINISTRATEUR (SETH PROD) ====================
 user = st.session_state['user']
 if user['id'] == 9999:
     st.title("👑 Panneau de Contrôle - Seth Prod")
@@ -167,36 +176,99 @@ if user['id'] == 9999:
         st.session_state['user'] = None
         st.rerun()
         
-    st.subheader("Liste de tous les commerçants abonnés")
-    cursor.execute("SELECT id, nom_boutique, username, date_expiration, statut FROM utilisateurs")
-    clients = cursor.fetchall()
+    tab_adm1, tab_adm2 = st.tabs(["👥 Gestion des Abonnés", "📢 Publier une Notification / Nouveauté"])
     
-    if clients:
-        df_clients = pd.DataFrame(clients, columns=["ID", "Boutique", "Identifiant", "Expiration", "Statut"])
-        st.dataframe(df_clients, use_container_width=True, hide_index=True)
+    with tab_adm1:
+        st.subheader("Liste de tous les commerçants abonnés")
+        cursor.execute("SELECT id, nom_boutique, username, date_expiration, statut FROM utilisateurs")
+        clients = cursor.fetchall()
         
-        st.markdown("### 🔄 Prolonger l'abonnement d'un client")
-        c_id = st.number_input("ID du client à prolonger", min_value=1, step=1)
-        jours_plus = st.number_input("Nombre de jours à ajouter", min_value=1, value=30)
-        
-        if st.button("Valider la prolongation"):
-            cursor.execute("SELECT date_expiration FROM utilisateurs WHERE id = ?", (c_id,))
-            res = cursor.fetchone()
-            if res:
-                date_actuelle_exp = datetime.datetime.strptime(res[0], "%Y-%m-%d").date()
-                base_date = max(date_actuelle_exp, datetime.date.today())
-                nouvelle_exp = (base_date + datetime.timedelta(days=jours_plus)).strftime("%Y-%m-%d")
+        if clients:
+            df_clients = pd.DataFrame(clients, columns=["ID", "Boutique", "Identifiant", "Expiration", "Statut"])
+            st.dataframe(df_clients, use_container_width=True, hide_index=True)
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.markdown("### 🔄 Prolonger un abonnement")
+                c_id = st.number_input("ID du client à prolonger", min_value=1, step=1, key="p_id")
+                jours_plus = st.number_input("Nombre de jours à ajouter", min_value=1, value=30, key="p_jours")
                 
-                cursor.execute("UPDATE utilisateurs SET date_expiration = ?, statut = 'Actif' WHERE id = ?", (nouvelle_exp, c_id))
+                if st.button("Valider la prolongation"):
+                    cursor.execute("SELECT date_expiration FROM utilisateurs WHERE id = ?", (c_id,))
+                    res = cursor.fetchone()
+                    if res:
+                        date_actuelle_exp = datetime.datetime.strptime(res[0], "%Y-%m-%d").date()
+                        base_date = max(date_actuelle_exp, datetime.date.today())
+                        nouvelle_exp = (base_date + datetime.timedelta(days=jours_plus)).strftime("%Y-%m-%d")
+                        
+                        cursor.execute("UPDATE utilisateurs SET date_expiration = ?, statut = 'Actif' WHERE id = ?", (nouvelle_exp, c_id))
+                        conn.commit()
+                        st.success(f"Abonnement du client ID {c_id} prolongé jusqu'au {nouvelle_exp} !")
+                        st.rerun()
+            
+            with col_b:
+                st.markdown("### 🗑️ Nettoyage des inactifs")
+                st.write("Supprimer automatiquement les comptes dont l'abonnement a expiré depuis plus d'une semaine.")
+                if st.button("Supprimer les inactifs (> 7 jours)", type="primary"):
+                    date_limite = (datetime.date.today() - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+                    cursor.execute("SELECT id, nom_boutique FROM utilisateurs WHERE date_expiration < ?", (date_limite,))
+                    inactifs = cursor.fetchall()
+                    
+                    if inactifs:
+                        for ina in inactifs:
+                            uid = ina[0]
+                            # Supprimer l'utilisateur et ses données associées
+                            cursor.execute("DELETE FROM utilisateurs WHERE id = ?", (uid,))
+                            cursor.execute("DELETE FROM produits WHERE user_id = ?", (uid,))
+                            cursor.execute("DELETE FROM ventes WHERE user_id = ?", (uid,))
+                            cursor.execute("DELETE FROM credits WHERE user_id = ?", (uid,))
+                        conn.commit()
+                        st.success(f"{len(inactifs)} compte(s) inactif(s) supprimé(s) avec succès !")
+                        st.rerun()
+                    else:
+                        st.info("Aucun compte inactif de plus d'une semaine trouvé.")
+        else:
+            st.info("Aucun commerçant inscrit.")
+
+    with tab_adm2:
+        st.subheader("Diffusez une notification ou une mise à jour")
+        with st.form("form_annonce"):
+            titre_notif = st.text_input("Titre de la nouveauté / notification")
+            contenu_notif = st.text_area("Détails de la mise à jour")
+            sub_notif = st.form_submit_button("Envoyer à tous les utilisateurs")
+            
+            if sub_notif and titre_notif and contenu_notif:
+                date_du_jour = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                cursor.execute("INSERT INTO annonces (titre, contenu, date_annonce) VALUES (?, ?, ?)",
+                               (titre_notif, contenu_notif, date_du_jour))
                 conn.commit()
-                st.success(f"Abonnement du client ID {c_id} prolongé jusqu'au {nouvelle_exp} !")
-                st.rerun()
-    else:
-        st.info("Aucun commerçant inscrit pour le moment.")
+                st.success("Notification diffusée avec succès à tous les commerçants !")
+            elif sub_notif:
+                st.error("Veuillez remplir le titre et le contenu.")
+
     st.stop()
 
 # ==================== APPLICATION PRINCIPALE (COMMERÇANT) ====================
 user_id = user['id']
+
+# --- VÉRIFICATION DES NOTIFICATIONS & EXPIRATION POUR LE COMMERÇANT ---
+cursor.execute("SELECT date_expiration FROM utilisateurs WHERE id = ?", (user_id,))
+date_exp_str = cursor.fetchone()[0]
+date_exp_obj = datetime.datetime.strptime(date_exp_str, "%Y-%m-%d").date()
+jours_restants = (date_exp_obj - datetime.date.today()).days
+
+# Alerte si l'abonnement expire bientôt (moins de 3 jours)
+if 0 <= jours_restants <= 3:
+    st.warning(f"⚠️ **Attention :** Votre abonnement expire dans {jours_restants} jour(s) (le {date_exp_str}). Pensez à renouveler auprès de Seth Prod (053119132).")
+
+# Affichage des dernières notifications / nouveautés de l'admin
+cursor.execute("SELECT titre, contenu, date_annonce FROM annonces ORDER BY id DESC LIMIT 3")
+dernieres_annonces = cursor.fetchall()
+if dernieres_annonces:
+    with st.expander("🔔 **Nouveautés & Notifications de Seth Prod** (Cliquez pour voir)"):
+        for ann in dernieres_annonces:
+            st.markdown(f"**📢 {ann[0]}** *({ann[2]})\n{ann[1]}")
+            st.markdown("---")
 
 st.sidebar.title(f"🏪 {user['boutique']}")
 if st.sidebar.button("Déconnexion"):
