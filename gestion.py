@@ -81,15 +81,15 @@ if 'user' not in st.session_state:
 if st.session_state['user'] is None:
     st.title("🔐 GestionStock Pro - Espace Connexion")
     
-    # Vos coordonnées affichées pour que les clients sachent comment vous joindre
+    # Coordonnées officielles de Seth Prod
     st.sidebar.markdown("### 📞 Support & Paiement")
     st.sidebar.info("""
     Besoin d'aide ou d'activer votre compte ?
-    * **WhatsApp / Mobile Money :** `+242 XX XXX XXXX`
-    * **Développeur :** Votre Nom / Support Technique
+    * **Développeur :** Seth Prod
+    * **WhatsApp / Mobile Money :** `053119132`
     """)
 
-    choix_auth = st.selectbox("Action", ["Connexion", "Créer un compte commerçant", "🔑 Accès Administrateur (Développeur)"])
+    choix_auth = st.selectbox("Action", ["Connexion", "Créer un compte commerçant"])
     
     if choix_auth == "Connexion":
         with st.form("form_login"):
@@ -98,6 +98,13 @@ if st.session_state['user'] is None:
             submit_login = st.form_submit_button("Se connecter")
             
             if submit_login:
+                # --- VÉRIFICATION SI C'EST L'ADMIN ---
+                if username == "adminseth" and password == "admin2309":
+                    st.session_state['user'] = {"id": 9999, "boutique": "ADMINISTRATION", "username": "adminseth"}
+                    st.success("Connexion Admin réussie !")
+                    st.rerun()
+                
+                # --- CONNEXION COMMERÇANT CLASSIQUE ---
                 cursor.execute("SELECT id, nom_boutique, username, password, date_expiration, statut FROM utilisateurs WHERE username = ?", (username,))
                 user_data = cursor.fetchone()
                 
@@ -112,7 +119,7 @@ if st.session_state['user'] is None:
                         st.success("Connexion réussie !")
                         st.rerun()
                     else:
-                        st.error("⚠️ Votre abonnement a expiré. Veuillez contacter le support pour renouveler.")
+                        st.error("⚠️ Votre abonnement a expiré. Veuillez contacter Seth Prod au 053119132 pour renouveler.")
                 else:
                     st.error("Identifiant ou mot de passe incorrect.")
                     
@@ -125,7 +132,9 @@ if st.session_state['user'] is None:
             submit_signup = st.form_submit_button("S'inscrire et se connecter")
             
             if submit_signup:
-                if nom_boutique and username and password:
+                if username == "adminseth":
+                    st.error("Cet identifiant est réservé.")
+                elif nom_boutique and username and password:
                     try:
                         date_essai = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
                         hashed_pw = make_hash(password)
@@ -134,7 +143,6 @@ if st.session_state['user'] is None:
                                        (nom_boutique, username, hashed_pw, date_essai, "Actif"))
                         conn.commit()
                         
-                        # Connexion automatique immédiate après l'inscription
                         cursor.execute("SELECT id, nom_boutique, username FROM utilisateurs WHERE username = ?", (username,))
                         new_user = cursor.fetchone()
                         st.session_state['user'] = {
@@ -149,27 +157,12 @@ if st.session_state['user'] is None:
                 else:
                     st.error("Veuillez remplir tous les champs.")
                     
-    else:
-        # --- ESPACE ADMIN POUR VOUS (LE DÉVELOPPEUR) ---
-        with st.form("form_admin"):
-            st.subheader("🛠️ Panneau d'administration de la plateforme")
-            admin_code = st.text_input("Code secret administrateur", type="password")
-            sub_admin = st.form_submit_button("Accéder au panneau")
-            
-            if sub_admin:
-                # Mettez ici votre mot de passe secret de développeur
-                if admin_code == "admin1234": 
-                    st.session_state['user'] = {"id": 9999, "boutique": "ADMINISTRATION", "username": "admin"}
-                    st.rerun()
-                else:
-                    st.error("Code administrateur incorrect.")
-                    
     st.stop()
 
 # ==================== SI VOUS ÊTES CONNECTÉ EN TANT QU'ADMIN ====================
 user = st.session_state['user']
 if user['id'] == 9999:
-    st.title("👑 Panneau de Contrôle Administrateur")
+    st.title("👑 Panneau de Contrôle - Seth Prod")
     if st.button("Se déconnecter de l'admin"):
         st.session_state['user'] = None
         st.rerun()
@@ -187,7 +180,6 @@ if user['id'] == 9999:
         jours_plus = st.number_input("Nombre de jours à ajouter", min_value=1, value=30)
         
         if st.button("Valider la prolongation"):
-            # Calculer la nouvelle date d'expiration
             cursor.execute("SELECT date_expiration FROM utilisateurs WHERE id = ?", (c_id,))
             res = cursor.fetchone()
             if res:
@@ -300,7 +292,7 @@ elif menu == "📝 Carnet de Crédits":
             client = st.text_input("Nom du client")
             montant = st.number_input("Montant (FCFA)", min_value=0.0)
             motif = st.text_input("Motif")
-            if st.form_submit_button("Enregistrer")and client and montant > 0:
+            if st.form_submit_button("Enregistrer") and client and montant > 0:
                 cursor.execute("INSERT INTO credits (user_id, client_nom, montant, motif, date_credit, statut) VALUES (?, ?, ?, ?, ?, ?)",
                                (user_id, client, montant, motif, datetime.datetime.now().strftime("%Y-%m-%d"), "Impayé"))
                 conn.commit()
@@ -332,7 +324,8 @@ elif menu == "📅 Mon Abonnement":
     st.markdown("### 💳 Comment renouveler ?")
     st.write("""
     Pour renouveler votre abonnement :
-    1. Effectuez le paiement par **Mobile Money** au numéro : `+242 XX XXX XXXX`
-    2. Envoyez une capture du transfert au support technique par WhatsApp avec le nom de votre boutique.
-    3. Votre compte sera prolongé de 30 jours rapidement.
+    * **Développeur :** Seth Prod
+    * **Numéro Mobile Money / WhatsApp :** `053119132`
+    
+    Effectuez votre paiement au numéro ci-dessus, puis envoyez la capture du transfert sur WhatsApp avec le nom de votre boutique pour prolonger votre accès de 30 jours.
     """)
