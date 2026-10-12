@@ -29,7 +29,6 @@ st.markdown("""
         padding-right: 0.8rem;
     }
     
-    /* Correction de la lisibilité des métriques en mode sombre et clair */
     div[data-testid="stMetric"] {
         background-color: rgba(255, 255, 255, 0.05);
         padding: 15px;
@@ -253,7 +252,8 @@ if user['id'] == 9999:
             df_clients = pd.DataFrame(clients, columns=["ID", "Boutique", "Identifiant", "Expiration", "Statut"])
             st.dataframe(df_clients, use_container_width=True, hide_index=True)
             
-            col_a, col_b = st.columns(2)
+            col_a, col_b, col_c = st.columns(3)
+            
             with col_a:
                 st.markdown("### 🔄 Prolonger Abonnement")
                 c_id = st.number_input("ID Client", min_value=1, step=1, key="p_id")
@@ -271,8 +271,26 @@ if user['id'] == 9999:
                         st.rerun()
             
             with col_b:
-                st.markdown("### 🗑️ Supprimer Inactifs (> 7 jours)")
-                if st.button("Nettoyer les inactifs", type="primary"):
+                st.markdown("### 🗑️ Supprimer un abonné")
+                del_id = st.number_input("ID de la boutique/gérant à retirer", min_value=1, step=1, key="del_id")
+                if st.button("Supprimer ce compte", type="primary"):
+                    cursor.execute("SELECT id FROM utilisateurs WHERE id = ? AND role = 'Gerant'", (del_id,))
+                    if cursor.fetchone():
+                        # Suppression de la boutique, de ses caissiers, et de toutes ses données
+                        cursor.execute("DELETE FROM utilisateurs WHERE id = ? OR parent_id = ?", (del_id, del_id))
+                        cursor.execute("DELETE FROM produits WHERE user_id = ?", (del_id,))
+                        cursor.execute("DELETE FROM ventes WHERE user_id = ?", (del_id,))
+                        cursor.execute("DELETE FROM credits WHERE user_id = ?", (del_id,))
+                        cursor.execute("DELETE FROM fournisseurs WHERE user_id = ?", (del_id,))
+                        conn.commit()
+                        st.success(f"Le compte ID {del_id} et ses données associées ont été supprimés.")
+                        st.rerun()
+                    else:
+                        st.error("ID Gérant introuvable.")
+
+            with col_c:
+                st.markdown("### 🧹 Nettoyer Inactifs (> 7j)")
+                if st.button("Nettoyer les inactifs"):
                     date_limite = (datetime.date.today() - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
                     cursor.execute("SELECT id FROM utilisateurs WHERE date_expiration < ? AND role = 'Gerant'", (date_limite,))
                     inactifs = cursor.fetchall()
