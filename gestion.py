@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- INJECTION CSS POUR NETTOYER L'INTERFACE ---
+# --- INJECTION CSS ADAPTÉE AU MOTEUR DE THÈME STREAMLIT ---
 st.markdown("""
     <style>
     header {visibility: hidden;}
@@ -28,12 +28,20 @@ st.markdown("""
         padding-left: 0.8rem;
         padding-right: 0.8rem;
     }
-    .stMetric {
-        background-color: #ffffff;
-        padding: 12px;
+    
+    /* Correction de la lisibilité des métriques en mode sombre et clair */
+    div[data-testid="stMetric"] {
+        background-color: rgba(255, 255, 255, 0.05);
+        padding: 15px;
         border-radius: 10px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.08);
-        border: 1px solid #e0e0e0;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+    div[data-testid="stMetricLabel"] p {
+        color: #e0e0e0 !important;
+    }
+    div[data-testid="stMetricValue"] div {
+        color: #ffffff !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -382,6 +390,8 @@ elif menu == "📊 Tableau de Bord":
     v_data = cursor.fetchall()
     if v_data:
         st.dataframe(pd.DataFrame(v_data, columns=["Vendeur", "Produit", "Qte", "Total FCFA", "Date"]), use_container_width=True, hide_index=True)
+    else:
+        st.info("Aucune vente enregistrée pour le moment.")
 
 # ==================== 3. GESTION DES STOCKS ====================
 elif menu in ["📦 Stocks", "📦 Stocks (Lecture)"]:
