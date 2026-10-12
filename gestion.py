@@ -10,27 +10,24 @@ st.set_page_config(
     page_title="SaaS GestionStock Pro - Seth Prod",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="collapsed"  # Masque la sidebar pour libérer l'écran mobile
+    initial_sidebar_state="collapsed"
 )
 
-# --- INJECTION CSS POUR MASQUER LES EN-TÊTES STREAMLIT/GITHUB ET ADAPTER AU MOBILE ---
+# --- INJECTION CSS POUR MASQUER LES ÉLÉMENTS NATIFS STREAMLIT ---
 st.markdown("""
     <style>
-    /* Masquer la barre supérieure native Streamlit/GitHub */
     header {visibility: hidden;}
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    .stAppDeployButton {display:none;}
+    .stAppDeployButton {display: none !important;}
+    iframe[data-testid="stStatusWidget"] {visibility: hidden;}
     
-    /* Optimisation du conteneur principal pour smartphone */
     .block-container {
         padding-top: 1rem;
         padding-bottom: 2rem;
         padding-left: 0.8rem;
         padding-right: 0.8rem;
     }
-    
-    /* Cartes de statistiques stylisées */
     .stMetric {
         background-color: #ffffff;
         padding: 12px;
@@ -46,7 +43,6 @@ def init_db():
     conn = sqlite3.connect("plateforme_saas.db", check_same_thread=False)
     cursor = conn.cursor()
     
-    # Table des utilisateurs (Propriétaires & Employés)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS utilisateurs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,7 +56,6 @@ def init_db():
         )
     ''')
     
-    # Table des produits (avec code-barres / référence)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS produits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,7 +68,6 @@ def init_db():
         )
     ''')
     
-    # Table des ventes
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS ventes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,7 +81,6 @@ def init_db():
         )
     ''')
 
-    # Table des crédits
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS credits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,7 +93,6 @@ def init_db():
         )
     ''')
 
-    # Table des fournisseurs
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fournisseurs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,7 +103,6 @@ def init_db():
         )
     ''')
 
-    # Table des annonces globales
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS annonces (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,7 +137,6 @@ if st.session_state['user'] is None:
             submit_login = st.form_submit_button("Se connecter", type="primary", use_container_width=True)
             
             if submit_login:
-                # Connexion Admin
                 if username == "adminseth" and password == "admin2309":
                     st.session_state['user'] = {"id": 9999, "boutique": "ADMINISTRATION", "username": "adminseth", "role": "Admin", "owner_id": 9999}
                     st.success("Connexion Admin réussie !")
@@ -158,7 +148,6 @@ if st.session_state['user'] is None:
                 if user_data and user_data[3] == make_hash(password):
                     owner_id = user_data[0] if user_data[6] == 'Gerant' else user_data[7]
                     
-                    # Vérifier l'abonnement du gérant principal
                     cursor.execute("SELECT date_expiration, statut FROM utilisateurs WHERE id = ?", (owner_id,))
                     ab_data = cursor.fetchone()
                     
@@ -194,7 +183,8 @@ if st.session_state['user'] is None:
                         date_essai = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
                         hashed_pw = make_hash(password)
                         
-                        cursor.execute("INSERT INTO utilisateurs (nom_boutique, username, password, date_expiration, statut, role, parent_id) VALUES (?, ?, ?, ?, ?, 'Gerant', 0)",
+                        # CORRECTION ICI : Utilisation des valeurs par défaut pour role et parent_id
+                        cursor.execute("INSERT INTO utilisateurs (nom_boutique, username, password, date_expiration, statut) VALUES (?, ?, ?, ?, ?)",
                                        (nom_boutique, username, hashed_pw, date_essai, "Actif"))
                         conn.commit()
                         
@@ -284,7 +274,6 @@ if user['id'] == 9999:
 owner_id = user['owner_id']
 role = user['role']
 
-# En-tête mobile épuré
 col_head1, col_head2 = st.columns([3, 1])
 with col_head1:
     st.markdown(f"### 🏪 {user['boutique']} `({role})`")
@@ -293,7 +282,6 @@ with col_head2:
         st.session_state['user'] = None
         st.rerun()
 
-# Menus accessibles selon le rôle
 if role == "Gerant":
     menu_options = ["🛒 Caisse", "📊 Tableau de Bord", "📦 Stocks", "📝 Crédits", "🏭 Fournisseurs", "👥 Caissiers", "📅 Abonnement"]
 else:
@@ -301,7 +289,6 @@ else:
 
 menu = st.radio("Navigation", menu_options, horizontal=True)
 
-# Notifications & Expiration
 cursor.execute("SELECT date_expiration FROM utilisateurs WHERE id = ?", (owner_id,))
 date_exp_str = cursor.fetchone()[0]
 jours_restants = (datetime.datetime.strptime(date_exp_str, "%Y-%m-%d").date() - datetime.date.today()).days
@@ -309,11 +296,10 @@ jours_restants = (datetime.datetime.strptime(date_exp_str, "%Y-%m-%d").date() - 
 if 0 <= jours_restants <= 3:
     st.warning(f"⚠️ Votre abonnement expire dans {jours_restants} jour(s). Contactez Seth Prod (053119132).")
 
-# ==================== 1. CAISSE & VENTI ====================
+# ==================== 1. CAISSE ====================
 if menu == "🛒 Caisse":
     st.subheader("🛒 Caisse & Scan Code-Barres")
     
-    # Recherche rapide par nom ou code-barres
     recherche = st.text_input("🔍 Rechercher par nom ou scanner le code-barres").strip()
     
     if recherche:
@@ -346,7 +332,6 @@ if menu == "🛒 Caisse":
             
             st.success(f"Vente enregistrée par {user['username']} !")
             
-            # Message WhatsApp pré-rempli pour le reçu du client
             texte_recu = f"🧾 *REÇU DE CAISSE - {user['boutique']}*\n" \
                          f"Client : {nom_client_recu or 'Client'}\n" \
                          f"Article : {p_nom} (x{qte_achat})\n" \
@@ -357,7 +342,7 @@ if menu == "🛒 Caisse":
             st.markdown(f"[📲 Envoyer le reçu sur WhatsApp]({url_wa})", unsafe_allow_html=True)
             st.balloons()
 
-# ==================== 2. TABLEAU DE BORD (GÉRANT SEUL) ====================
+# ==================== 2. TABLEAU DE BORD ====================
 elif menu == "📊 Tableau de Bord":
     st.subheader("📊 Tableau de Bord Financier")
     cursor.execute("SELECT SUM(total), COUNT(*) FROM ventes WHERE user_id = ?", (owner_id,))
@@ -390,7 +375,6 @@ elif menu in ["📦 Stocks", "📦 Stocks (Lecture)"]:
                 prix = st.number_input("Prix unitaire (FCFA)", min_value=0.0, step=100.0)
                 qte = st.number_input("Quantité initiale", min_value=0, step=1)
                 
-                # Sélection du fournisseur
                 cursor.execute("SELECT id, nom FROM fournisseurs WHERE user_id = ?", (owner_id,))
                 f_list = cursor.fetchall()
                 f_dict = {f[1]: f[0] for f in f_list}
@@ -466,10 +450,9 @@ elif menu == "🏭 Fournisseurs":
             url_cmd = f"https://api.whatsapp.com/send?phone={f_dict[choix_f]}&text={urllib.parse.quote(message_cmd)}"
             st.markdown(f"[📲 Envoyer le bon de commande sur WhatsApp]({url_cmd})", unsafe_allow_html=True)
 
-# ==================== 6. CAISSIERS / EMPLOYÉS ====================
+# ==================== 6. CAISSIERS ====================
 elif menu == "👥 Caissiers":
     st.subheader("👥 Création des comptes Caissiers")
-    st.info("Créez des accès limités pour vos employés. Ils pourront faire des ventes sans voir votre chiffre d'affaires global.")
     
     with st.form("form_caissier"):
         user_c = st.text_input("Identifiant du caissier").strip()
@@ -501,6 +484,4 @@ elif menu == "📅 Abonnement":
     st.write("""
     * **Développeur :** Seth Prod
     * **WhatsApp / Mobile Money :** `053119132`
-    
-    Pour renouveler votre accès mensuel, effectuez le transfert Mobile Money au numéro ci-dessus et envoyez la capture sur WhatsApp.
     """)
