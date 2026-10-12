@@ -56,7 +56,7 @@ def init_db():
         )
     ''')
     
-    # Sécurité : Ajouter les colonnes si la table existait déjà sans elles
+    # Migrations sécurisées pour utilisateurs
     try:
         cursor.execute("ALTER TABLE utilisateurs ADD COLUMN role TEXT DEFAULT 'Gerant'")
     except sqlite3.OperationalError:
@@ -78,6 +78,17 @@ def init_db():
             fournisseur_id INTEGER
         )
     ''')
+    
+    # Migrations sécurisées pour produits
+    try:
+        cursor.execute("ALTER TABLE produits ADD COLUMN code_barre TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE produits ADD COLUMN fournisseur_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS ventes (
