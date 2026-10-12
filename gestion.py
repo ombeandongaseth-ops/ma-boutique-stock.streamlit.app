@@ -38,11 +38,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- INITIALISATION DE LA BASE DE DONNÉES AVEC MIGRATION SÛRE ---
+# --- INITIALISATION DE LA BASE DE DONNÉES AVEC MIGRATIONS TOTALES ---
 def init_db():
     conn = sqlite3.connect("plateforme_saas.db", check_same_thread=False)
     cursor = conn.cursor()
     
+    # 1. Table Utilisateurs
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS utilisateurs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,18 +56,12 @@ def init_db():
             parent_id INTEGER DEFAULT 0
         )
     ''')
-    
-    # Migrations sécurisées pour utilisateurs
-    try:
-        cursor.execute("ALTER TABLE utilisateurs ADD COLUMN role TEXT DEFAULT 'Gerant'")
-    except sqlite3.OperationalError:
-        pass
-        
-    try:
-        cursor.execute("ALTER TABLE utilisateurs ADD COLUMN parent_id INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
+    try: cursor.execute("ALTER TABLE utilisateurs ADD COLUMN role TEXT DEFAULT 'Gerant'")
+    except sqlite3.OperationalError: pass
+    try: cursor.execute("ALTER TABLE utilisateurs ADD COLUMN parent_id INTEGER DEFAULT 0")
+    except sqlite3.OperationalError: pass
 
+    # 2. Table Produits
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS produits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,18 +73,12 @@ def init_db():
             fournisseur_id INTEGER
         )
     ''')
+    try: cursor.execute("ALTER TABLE produits ADD COLUMN code_barre TEXT")
+    except sqlite3.OperationalError: pass
+    try: cursor.execute("ALTER TABLE produits ADD COLUMN fournisseur_id INTEGER")
+    except sqlite3.OperationalError: pass
     
-    # Migrations sécurisées pour produits
-    try:
-        cursor.execute("ALTER TABLE produits ADD COLUMN code_barre TEXT")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        cursor.execute("ALTER TABLE produits ADD COLUMN fournisseur_id INTEGER")
-    except sqlite3.OperationalError:
-        pass
-    
+    # 3. Table Ventes
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS ventes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,7 +91,12 @@ def init_db():
             date_vente TEXT NOT NULL
         )
     ''')
+    try: cursor.execute("ALTER TABLE ventes ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError: pass
+    try: cursor.execute("ALTER TABLE ventes ADD COLUMN vendeur TEXT NOT NULL DEFAULT 'Admin'")
+    except sqlite3.OperationalError: pass
 
+    # 4. Table Credits
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS credits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,7 +108,10 @@ def init_db():
             statut TEXT NOT NULL
         )
     ''')
+    try: cursor.execute("ALTER TABLE credits ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError: pass
 
+    # 5. Table Fournisseurs
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fournisseurs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,7 +121,10 @@ def init_db():
             adresse TEXT
         )
     ''')
+    try: cursor.execute("ALTER TABLE fournisseurs ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError: pass
 
+    # 6. Table Annonces
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS annonces (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
