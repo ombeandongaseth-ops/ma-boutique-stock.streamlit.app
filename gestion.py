@@ -13,14 +13,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- INJECTION CSS POUR MASQUER LES ÉLÉMENTS NATIFS STREAMLIT ---
+# --- INJECTION CSS POUR NETTOYER L'INTERFACE ---
 st.markdown("""
     <style>
     header {visibility: hidden;}
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stAppDeployButton {display: none !important;}
-    iframe[data-testid="stStatusWidget"] {visibility: hidden;}
+    iframe[data-testid="stStatusWidget"] {display: none !important; visibility: hidden;}
     
     .block-container {
         padding-top: 1rem;
@@ -38,7 +38,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- INITIALISATION DE LA BASE DE DONNÉES ---
+# --- INITIALISATION DE LA BASE DE DONNÉES AVEC MIGRATION SÛRE ---
 def init_db():
     conn = sqlite3.connect("plateforme_saas.db", check_same_thread=False)
     cursor = conn.cursor()
@@ -56,6 +56,17 @@ def init_db():
         )
     ''')
     
+    # Sécurité : Ajouter les colonnes si la table existait déjà sans elles
+    try:
+        cursor.execute("ALTER TABLE utilisateurs ADD COLUMN role TEXT DEFAULT 'Gerant'")
+    except sqlite3.OperationalError:
+        pass
+        
+    try:
+        cursor.execute("ALTER TABLE utilisateurs ADD COLUMN parent_id INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS produits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -183,7 +194,6 @@ if st.session_state['user'] is None:
                         date_essai = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
                         hashed_pw = make_hash(password)
                         
-                        # CORRECTION ICI : Utilisation des valeurs par défaut pour role et parent_id
                         cursor.execute("INSERT INTO utilisateurs (nom_boutique, username, password, date_expiration, statut) VALUES (?, ?, ?, ?, ?)",
                                        (nom_boutique, username, hashed_pw, date_essai, "Actif"))
                         conn.commit()
